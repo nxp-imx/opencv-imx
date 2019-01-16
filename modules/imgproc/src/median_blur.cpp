@@ -931,6 +931,7 @@ medianBlur_SortNet( const Mat& _src, Mat& _dst, int m )
 #endif
     }
 }
+}
 
 #ifdef HAVE_OPENCL
 
@@ -1152,7 +1153,7 @@ static bool ipp_medianFilter(Mat &src0, Mat &dst, int ksize)
     }
 }
 #endif
-}
+
 
 void medianBlur( InputArray _src0, OutputArray _dst, int ksize )
 {

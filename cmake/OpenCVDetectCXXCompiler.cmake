@@ -168,7 +168,7 @@ endif()
 
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
-set(CMAKE_CXX_EXTENSIONS OFF) # use -std=c++11 instead of -std=gnu++11
+set(CMAKE_CXX_EXTENSIONS ON) # use -std=c++11 instead of -std=gnu++11
 if(CMAKE_CXX11_COMPILE_FEATURES)
   set(HAVE_CXX11 ON)
 endif()

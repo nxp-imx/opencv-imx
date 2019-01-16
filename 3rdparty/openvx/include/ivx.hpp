@@ -1739,7 +1739,8 @@ static const vx_enum
         case VX_DF_IMAGE_YUYV: return CV_8UC2;
         case VX_DF_IMAGE_NV12:
         case VX_DF_IMAGE_NV21: return planeIdx == 0 ? CV_8UC1 : CV_8UC2;
-        default: return CV_USRTYPE1;
+        default: return -1;
+		 
         }
     }
 
