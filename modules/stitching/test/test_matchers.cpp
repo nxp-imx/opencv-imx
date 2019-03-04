@@ -43,8 +43,7 @@
 
 namespace opencv_test { namespace {
 
-#ifdef HAVE_OPENCV_XFEATURES2D
-
+#if defined (HAVE_OPENCV_XFEATURES2D) && defined (OPENCV_ENABLE_NONFREE)
 TEST(SurfFeaturesFinder, CanFindInROIs)
 {
     Ptr<Feature2D> finder = xfeatures2d::SURF::create();
