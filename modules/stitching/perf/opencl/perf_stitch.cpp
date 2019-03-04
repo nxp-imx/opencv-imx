@@ -19,7 +19,7 @@ namespace ocl {
 
 typedef TestBaseWithParam<string> stitch;
 
-#ifdef HAVE_OPENCV_XFEATURES2D
+#if defined (HAVE_OPENCV_XFEATURES2D) && defined (OPENCV_ENABLE_NONFREE)
 #define TEST_DETECTORS testing::Values("surf", "orb", "akaze")
 #else
 #define TEST_DETECTORS testing::Values("orb", "akaze")
@@ -28,7 +28,6 @@ typedef TestBaseWithParam<string> stitch;
 OCL_PERF_TEST_P(stitch, a123, TEST_DETECTORS)
 {
     UMat pano;
-
     vector<Mat> _imgs;
     _imgs.push_back( imread( getDataPath("stitching/a1.png") ) );
     _imgs.push_back( imread( getDataPath("stitching/a2.png") ) );
