@@ -171,7 +171,7 @@ __kernel void ConvolveBasic(
         const int biasIndex = bias_offset + kernelNum;
 #endif
         const int local_image_offset = org_y * input_width + org_x;
-        const int imageSize = input_width * input_height;
+        const int imageSize = (int)input_width * (int)input_height;
         __global Dtype* image_dataPtr = (image_data + (image_offset + local_image_offset));
         __global Dtype* kernel_dataPtr = (kernel_data + (currentKernelOffset));
         for (int c = 0; c < CHANNELS; c++)
