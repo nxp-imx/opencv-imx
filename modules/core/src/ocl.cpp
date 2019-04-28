@@ -73,6 +73,8 @@
 #define CV_OPENCL_SHOW_SVM_ERROR_LOG             1
 #define CV_OPENCL_SHOW_SVM_LOG                   0
 
+#define CV_OPENCL_DATA_PTR_ALIGNMENT             64
+
 #include "opencv2/core/bufferpool.hpp"
 #ifndef LOG_BUFFER_POOL
 # if 0
@@ -4296,6 +4298,7 @@ struct CLBufferEntry
 {
     cl_mem clBuffer_;
     size_t capacity_;
+    void* clHostPtr_;
     CLBufferEntry() : clBuffer_((cl_mem)NULL), capacity_(0) { }
 };
 
@@ -4317,7 +4320,8 @@ public:
         entry.capacity_ = alignSize(size, (int)_allocationGranularity(size));
         Context& ctx = Context::getDefault();
         cl_int retval = CL_SUCCESS;
-        entry.clBuffer_ = clCreateBuffer((cl_context)ctx.ptr(), CL_MEM_READ_WRITE|createFlags_, entry.capacity_, 0, &retval);
+        CV_Assert(entry.clHostPtr_ = aligned_alloc(CV_OPENCL_DATA_PTR_ALIGNMENT, entry.capacity_));
+        entry.clBuffer_ = clCreateBuffer((cl_context)ctx.ptr(), CL_MEM_READ_WRITE|createFlags_|CL_MEM_USE_HOST_PTR, entry.capacity_, entry.clHostPtr_, &retval);
         CV_OCL_CHECK_RESULT(retval, cv::format("clCreateBuffer(capacity=%lld) => %p", (long long int)entry.capacity_, (void*)entry.clBuffer_).c_str());
         CV_Assert(entry.clBuffer_ != NULL);
         if(retval == CL_SUCCESS)
@@ -4336,6 +4340,7 @@ public:
         LOG_BUFFER_POOL("OpenCL release buffer: %p, %lld (0x%llx) bytes\n",
                 entry.clBuffer_, (long long)entry.capacity_, (long long)entry.capacity_);
         CV_OCL_DBG_CHECK(clReleaseMemObject(entry.clBuffer_));
+        free(entry.clHostPtr_);
     }
 };
 
@@ -6443,9 +6448,11 @@ struct Image2D::Impl
         size_t region[] = { static_cast<size_t>(src.cols), static_cast<size_t>(src.rows), 1 };
 
         cl_mem devData;
+        void* clHostPtr = nullptr;
         if (!alias && !src.isContinuous())
         {
-            devData = clCreateBuffer(context, CL_MEM_READ_ONLY, src.cols * src.rows * src.elemSize(), NULL, &err);
+            CV_Assert(clHostPtr = aligned_alloc(CV_OPENCL_DATA_PTR_ALIGNMENT, src.cols * src.rows * src.elemSize()));
+            devData = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, src.cols * src.rows * src.elemSize(), clHostPtr, &err);
             CV_OCL_CHECK_RESULT(err, cv::format("clCreateBuffer(CL_MEM_READ_ONLY, sz=%lld) => %p",
                     (long long int)(src.cols * src.rows * src.elemSize()), (void*)devData
                 ).c_str());
@@ -6468,6 +6475,7 @@ struct Image2D::Impl
             {
                 CV_OCL_DBG_CHECK(clFlush(queue));
                 CV_OCL_DBG_CHECK(clReleaseMemObject(devData));
+                free(clHostPtr);
             }
         }
     }
