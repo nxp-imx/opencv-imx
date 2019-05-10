@@ -321,6 +321,7 @@ void OCL4DNNConvSpatial<Dtype>::collectCommonInformation()
         addDef("TYPE", TYPE_FLOAT);
         addDef("Dtype", "float");
         addDef("Dtype2", "float2");
+        addDef("Dtype3", "float3");
         addDef("Dtype4", "float4");
         addDef("Dtype8", "float8");
         addDef("Dtype16", "float16");
