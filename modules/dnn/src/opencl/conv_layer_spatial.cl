@@ -133,6 +133,39 @@
 
 #ifdef KERNEL_BASIC
 
+#if (DILATION_X == 1 && DILATION_Y == 1 && STRIDE_X == 1 && STRIDE_Y == 1)
+    #if (KERNEL_WIDTH == 3 && KERNEL_HEIGHT == 3)
+        #define KERNEL_TYPE_VECTORIZED
+        #define KERNEL_TYPE_3X3
+        #define VECTOR_TYPE Dtype3
+        #define VECTOR_LOAD vload3
+    #elif (KERNEL_WIDTH == 5 && KERNEL_HEIGHT == 5)
+        #define KERNEL_TYPE_VECTORIZED
+        #define KERNEL_TYPE_5X5
+        #define VECTOR_TYPE Dtype8
+        #define VECTOR_LOAD vload8
+    #elif (KERNEL_WIDTH == 7 && KERNEL_HEIGHT == 7)
+        #define KERNEL_TYPE_VECTORIZED
+        #define KERNEL_TYPE_7X7
+        #define VECTOR_TYPE Dtype8
+        #define VECTOR_LOAD vload8
+    #elif (KERNEL_WIDTH == 11 && KERNEL_HEIGHT == 11)
+        #define KERNEL_TYPE_VECTORIZED
+        #define KERNEL_TYPE_11X11
+        #define VECTOR_TYPE Dtype16
+        #define VECTOR_LOAD vload16
+    #endif
+#endif
+
+#define ACCUMULATE_CONV( sum, image, kernel, offset, min, max ) \
+    {                                                           \
+        if ((offset >= min) && (offset < max))                  \
+        {                                                       \
+            sum += image * kernel;                              \
+        }                                                       \
+        offset++;                                               \
+    }
+
 __kernel void ConvolveBasic(
     ELTWISE_DATA_ARG
     FUSED_ARG
@@ -154,59 +187,80 @@ __kernel void ConvolveBasic(
 )
 {
     __global Dtype* convolved_image = convolved_image_base + convolved_image_base_offset;
-    const int outputX = get_global_id(0);
-    const int outputY = get_global_id(1);
-    const int kernelNum = get_global_id(2) * ZPAR;
-    if (outputX < output_width && outputY < output_height)
+    const int out_x = get_global_id(0);
+    const int out_y = get_global_id(1);
+    const int out_z = get_global_id(2) * ZPAR;
+    if (out_x < output_width && out_y < output_height)
     {
-        Dtype sum[ZPAR];
+        Dtype sum[ZPAR] = { 0 };
+        const int org_y = out_y * STRIDE_Y - pad_h;
+        const int org_x = out_x * STRIDE_X - pad_w;
+    
+        const int local_image_offset = org_y * input_width + org_x;
+        const int image_size = (int)input_width * (int)input_height;
+        __global Dtype* image_data_ptr = (image_data + (image_offset + local_image_offset));
+        
         for (int kern = 0; kern < ZPAR; kern++)
         {
-            sum[kern] = 0.0f;
-        }
-        const int org_y = outputY * STRIDE_Y - pad_h;
-        const int org_x = outputX * STRIDE_X - pad_w;
-        const int currentKernelOffset = kernel_offset + kernelNum*KERNEL_HEIGHT*KERNEL_WIDTH*CHANNELS;
-#if APPLY_BIAS
-        const int biasIndex = bias_offset + kernelNum;
-#endif
-        const int local_image_offset = org_y * input_width + org_x;
-        const int imageSize = (int)input_width * (int)input_height;
-        __global Dtype* image_dataPtr = (image_data + (image_offset + local_image_offset));
-        __global Dtype* kernel_dataPtr = (kernel_data + (currentKernelOffset));
-        for (int c = 0; c < CHANNELS; c++)
-        {
-            for (int y = 0; y < KERNEL_HEIGHT; y++)
+            const int local_kernel_offset = kernel_offset + (out_z + kern) * KERNEL_HEIGHT * KERNEL_WIDTH * CHANNELS;
+            __global Dtype* kernel_data_ptr = kernel_data + local_kernel_offset;
+            for (int c = 0; c < CHANNELS; c++)
             {
-                for (int x = 0; x < KERNEL_WIDTH; x++)
+                for (int y = 0; y < KERNEL_HEIGHT; y++)
                 {
                     int y_ = org_y + y * DILATION_Y;
-                    int x_ = org_x + x * DILATION_X;
-                    if (!(y_ >= 0 && y_ < input_height && x_ >= 0 && x_ < input_width))
+                    if ((y_ >= 0) && (y_ < input_height))
                     {
-                        continue;
+                    #ifdef KERNEL_TYPE_VECTORIZED
+                        // vectorized impl for 3x3, 5x5, 7x7, 11x11 kernels with stride and dilation 1
+                        VECTOR_TYPE ker = VECTOR_LOAD(0, kernel_data_ptr);
+                        VECTOR_TYPE image = VECTOR_LOAD(0, image_data_ptr);
+                        int x_ = org_x;
+                        ACCUMULATE_CONV(sum[kern], image.s0, ker.s0, x_, 0, input_width)
+                        ACCUMULATE_CONV(sum[kern], image.s1, ker.s1, x_, 0, input_width);
+                        ACCUMULATE_CONV(sum[kern], image.s2, ker.s2, x_, 0, input_width);
+                        #if defined KERNEL_TYPE_5X5 || defined KERNEL_TYPE_7X7 || defined KERNEL_TYPE_11X11
+                        ACCUMULATE_CONV(sum[kern], image.s3, ker.s3, x_, 0, input_width);
+                        ACCUMULATE_CONV(sum[kern], image.s4, ker.s4, x_, 0, input_width);
+                        #elif defined KERNEL_TYPE_7X7 || defined KERNEL_TYPE_11X11
+                        ACCUMULATE_CONV(sum[kern], image.s5, ker.s5, x_, 0, input_width);
+                        ACCUMULATE_CONV(sum[kern], image.s6, ker.s6, x_, 0, input_width);
+                        #elif defined KERNEL_TYPE_11X11
+                        ACCUMULATE_CONV(sum[kern], image.s7, ker.s7, x_, 0, input_width);
+                        ACCUMULATE_CONV(sum[kern], image.s8, ker.s8, x_, 0, input_width);
+                        ACCUMULATE_CONV(sum[kern], image.s9, ker.s9, x_, 0, input_width);
+                        ACCUMULATE_CONV(sum[kern], image.sa, ker.sa, x_, 0, input_width);
+                        #endif // KERNEL_TYPE_5X5/KERNEL_TYPE_7X7/KERNEL_TYPE_11X11
+                    #else
+                        // non-vectorized impl, used for any convolution
+                        for (int x = 0; x < KERNEL_WIDTH; x++)
+                        {
+                            const int x_ = org_x + x * DILATION_X;
+                            if ((x_ >= 0) && (x_ < input_width))
+                            {
+                                sum[kern] += image_data_ptr[x * DILATION_X] * kernel_data_ptr[kern * KERNEL_HEIGHT * KERNEL_WIDTH * CHANNELS + x];
+                            }
+                        }
+                    #endif // KERNEL_TYPE_VECTORIZED
                     }
-                    for (int kern = 0; kern < ZPAR; kern++)
-                    {
-                        sum[kern] += image_dataPtr[x * DILATION_X] * kernel_dataPtr[kern*KERNEL_HEIGHT*KERNEL_WIDTH*CHANNELS + x];
-                    }
+                    image_data_ptr += input_width * DILATION_Y;
+                    kernel_data_ptr += KERNEL_WIDTH;
                 }
-                image_dataPtr += input_width * DILATION_Y;
-                kernel_dataPtr += KERNEL_WIDTH;
+                image_data_ptr += image_size - input_width * KERNEL_HEIGHT * DILATION_Y;
             }
-            image_dataPtr += imageSize - input_width*KERNEL_HEIGHT*DILATION_Y;
-        }
 
-        for (int kern = 0; kern < ZPAR; kern++)
-        {
-            if (kernelNum + kern < OUTPUT_Z)
+            if (out_z + kern < OUTPUT_Z)
             {
-                int offset = convolved_image_offset + (kernelNum+kern)*output_height*output_width + outputY*output_width + outputX;
-#if APPLY_BIAS
-                ACTIVATION_FUNCTION(convolved_image, offset, sum[kern] + bias[biasIndex + kern], biasIndex + kern);
-#else
-                ACTIVATION_FUNCTION(convolved_image, offset, sum[kern], biasIndex + kern);
-#endif
+                const int offset = convolved_image_offset
+                    + ((out_z + kern) * output_height * output_width)
+                    + (out_y * output_width)
+                    + out_x;
+            #if APPLY_BIAS
+                const int bias_idx = bias_offset + out_z;
+                ACTIVATION_FUNCTION(convolved_image, offset, sum[kern] + bias[bias_idx + kern], bias_idx + kern);
+            #else
+                ACTIVATION_FUNCTION(convolved_image, offset, sum[kern], kern);
+            #endif
             }
         }
     }
