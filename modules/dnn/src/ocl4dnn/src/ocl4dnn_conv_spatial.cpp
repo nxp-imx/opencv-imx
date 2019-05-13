@@ -12,6 +12,7 @@
 //
 // Copyright (C) 2017, Intel Corporation, all rights reserved.
 // Copyright (c) 2016-2017 Fabian David Tschopp, all rights reserved.
+// Copyright 2019 NXP
 // Third party copyrights are property of their respective owners.
 //
 // Redistribution and use in source and binary forms, with or without modification,
