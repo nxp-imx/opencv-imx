@@ -223,15 +223,17 @@ __kernel void ConvolveBasic(
                         #if defined KERNEL_TYPE_5X5 || defined KERNEL_TYPE_7X7 || defined KERNEL_TYPE_11X11
                         ACCUMULATE_CONV(sum[kern], image.s3, ker.s3, x_, 0, input_width);
                         ACCUMULATE_CONV(sum[kern], image.s4, ker.s4, x_, 0, input_width);
-                        #elif defined KERNEL_TYPE_7X7 || defined KERNEL_TYPE_11X11
+                        #endif // KERNEL_TYPE_5X5/KERNEL_TYPE_7X7/KERNEL_TYPE_11X11
+                        #if defined KERNEL_TYPE_7X7 || defined KERNEL_TYPE_11X11
                         ACCUMULATE_CONV(sum[kern], image.s5, ker.s5, x_, 0, input_width);
                         ACCUMULATE_CONV(sum[kern], image.s6, ker.s6, x_, 0, input_width);
-                        #elif defined KERNEL_TYPE_11X11
+                        #endif // KERNEL_TYPE_7X7/KERNEL_TYPE_11X11
+                        #if defined KERNEL_TYPE_11X11
                         ACCUMULATE_CONV(sum[kern], image.s7, ker.s7, x_, 0, input_width);
                         ACCUMULATE_CONV(sum[kern], image.s8, ker.s8, x_, 0, input_width);
                         ACCUMULATE_CONV(sum[kern], image.s9, ker.s9, x_, 0, input_width);
                         ACCUMULATE_CONV(sum[kern], image.sa, ker.sa, x_, 0, input_width);
-                        #endif // KERNEL_TYPE_5X5/KERNEL_TYPE_7X7/KERNEL_TYPE_11X11
+                        #endif // KERNEL_TYPE_11X11
                     #else
                         // non-vectorized impl, used for any convolution
                         for (int x = 0; x < KERNEL_WIDTH; x++)
