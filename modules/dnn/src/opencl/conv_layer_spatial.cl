@@ -138,8 +138,13 @@
     #if (KERNEL_WIDTH == 3 && KERNEL_HEIGHT == 3)
         #define KERNEL_TYPE_VECTORIZED
         #define KERNEL_TYPE_3X3
-        #define VECTOR_TYPE Dtype3
-        #define VECTOR_LOAD vload3
+        #ifndef Dtype3
+            #define VECTOR_TYPE Dtype4
+            #define VECTOR_LOAD vload4
+        #else
+            #define VECTOR_TYPE Dtype3
+            #define VECTOR_LOAD vload3
+        #endif
     #elif (KERNEL_WIDTH == 5 && KERNEL_HEIGHT == 5)
         #define KERNEL_TYPE_VECTORIZED
         #define KERNEL_TYPE_5X5
@@ -159,13 +164,13 @@
 #endif
 
 #define ACCUMULATE_CONV( sum, image, kernel, offset, min, max ) \
-    {                                                           \
+    do {                                                        \
         if ((offset >= min) && (offset < max))                  \
         {                                                       \
             sum += image * kernel;                              \
         }                                                       \
         offset++;                                               \
-    }
+    } while(0)
 
 __kernel void ConvolveBasic(
     ELTWISE_DATA_ARG
@@ -217,7 +222,7 @@ __kernel void ConvolveBasic(
                         VECTOR_TYPE ker = VECTOR_LOAD(0, kernel_data_ptr);
                         VECTOR_TYPE image = VECTOR_LOAD(0, image_data_ptr);
                         int x_ = org_x;
-                        ACCUMULATE_CONV(sum[kern], image.s0, ker.s0, x_, 0, input_width)
+                        ACCUMULATE_CONV(sum[kern], image.s0, ker.s0, x_, 0, input_width);
                         ACCUMULATE_CONV(sum[kern], image.s1, ker.s1, x_, 0, input_width);
                         ACCUMULATE_CONV(sum[kern], image.s2, ker.s2, x_, 0, input_width);
                         #if defined KERNEL_TYPE_5X5 || defined KERNEL_TYPE_7X7 || defined KERNEL_TYPE_11X11
@@ -233,7 +238,7 @@ __kernel void ConvolveBasic(
                         ACCUMULATE_CONV(sum[kern], image.s8, ker.s8, x_, 0, input_width);
                         ACCUMULATE_CONV(sum[kern], image.s9, ker.s9, x_, 0, input_width);
                         ACCUMULATE_CONV(sum[kern], image.sa, ker.sa, x_, 0, input_width);
-                        #endif // KERNEL_TYPE_11X11
+                        #endif // KERNEL_TYPE_5X5/KERNEL_TYPE_7X7/KERNEL_TYPE_11X11
                     #else
                         // non-vectorized impl, used for any convolution
                         for (int x = 0; x < KERNEL_WIDTH; x++)
