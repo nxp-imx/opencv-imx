@@ -3,6 +3,7 @@
 // of this distribution and at http://opencv.org/license.html.
 
 // Copyright (C) 2017, Intel Corporation, all rights reserved.
+// Copyright 2019 NXP
 // Third party copyrights are property of their respective owners.
 
 /*
@@ -301,7 +302,7 @@ TEST_P(Test_TensorFlow_nets, MobileNet_SSD)
     std::vector<Mat> output;
     net.forward(output, outNames);
 
-    normAssert(refs[0].reshape(1, 1), output[0].reshape(1, 1), "", 1e-5, 1.5e-4);
+    normAssert(refs[0].reshape(1, 1), output[0].reshape(1, 1), "", 1e-5, 1.6e-4);
     normAssert(refs[1].reshape(1, 1), output[1].reshape(1, 1), "", 1e-5, 3e-4);
     normAssertDetections(refs[2], output[2], "", 0.2);
 }

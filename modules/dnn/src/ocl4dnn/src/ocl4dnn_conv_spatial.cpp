@@ -337,7 +337,8 @@ typedef enum {
     KERNEL_TYPE_INTEL_IDLF = 2,
     KERNEL_TYPE_BASIC = 4,
     KERNEL_TYPE_GEMM_LIKE = 5,
-    KERNEL_TYPE_DWCONV = 6
+    KERNEL_TYPE_DWCONV = 6,
+    KERNEL_TYPE_WINOGRAD = 7
 } ocl4dnnConvSpatialKernelType_t;
 
 template<typename Dtype>
@@ -480,6 +481,31 @@ void OCL4DNNConvSpatial<Dtype>::setupKernelDetails(int32_t kernelType,
         options_ << " -D DWCONV=" << kernel_name_;
         src_ = cv::ocl::dnn::conv_layer_spatial_oclsrc;
     }
+    else if (kernelType == KERNEL_TYPE_WINOGRAD)
+    {
+        kernelUKey = generateSpecificKey(KERNEL_TYPE_WINOGRAD, blockM, blockK, blockN);
+        kernel_name_ = "WINOGRAD_";
+        kernel_name_ += kernelUKey.c_str();
+
+        std::string winogradFuncName = "ConvolveWinograd";
+        if (kernel_w_ == 3 && kernel_h_ == 3)
+        {
+            addDef("KERNEL_WINOGRAD_3X3");
+            winogradFuncName += "_i4_k3_o2"; // F(3x3,2x2) with 4x4 input
+        }
+
+        options_ << " -cl-fast-relaxed-math ";
+        options_ << " -D " << winogradFuncName << "=" << kernel_name_;
+
+        addDef("CHANNELS", channels_ / group_);
+        addDef("APPLY_BIAS", bias_term_);
+        addDef("OUTPUT_Z", M_);
+        addDef("ZPAR", 1);        
+        addDef("KERNEL_SIZE", kernel_h_ * kernel_w_);
+
+        setFusionDefine(fused_activ_, fused_eltwise_);
+        src_ = cv::ocl::dnn::conv_layer_winograd_oclsrc;
+    }
 }
 
 template<typename Dtype>
@@ -489,11 +515,14 @@ void OCL4DNNConvSpatial<Dtype>::setupKernel()
 
     addDef("KERNEL_WIDTH", kernel_w_);
     addDef("KERNEL_HEIGHT" , kernel_h_);
-    addDef("STRIDE_X", stride_w_);
-    addDef("STRIDE_Y", stride_h_);
-    addDef("DILATION_X", dilation_w_);
-    addDef("DILATION_Y", dilation_h_);
-    if (kernelType_ != KERNEL_TYPE_BASIC)
+    if (kernelType_ != KERNEL_TYPE_WINOGRAD) // winograd currently assumes stride/dialation=1
+    {
+        addDef("STRIDE_X", stride_w_);
+        addDef("STRIDE_Y", stride_h_);
+        addDef("DILATION_X", dilation_w_);
+        addDef("DILATION_Y", dilation_h_);
+    }
+    if ((kernelType_ != KERNEL_TYPE_BASIC) && (kernelType_ != KERNEL_TYPE_WINOGRAD))
     {
         addDef("INPUT_PAD_W", pad_w_);
         addDef("INPUT_PAD_H", pad_h_);
@@ -729,6 +758,54 @@ void interleaveMatrix(Dtype* mem_dst, const Dtype *mem,
 }
 
 template<typename Dtype>
+void OCL4DNNConvSpatial<Dtype>::prepareWinogradInput(const UMat& ref_mat, int32_t width, int32_t height, int32_t channels, int32_t num_images)
+{
+    const int32_t total_height = height + pad_h_ + pad_bottom_;
+    const int32_t total_width = width + pad_w_ + pad_right_;
+
+    const int32_t bottom_size[] = { num_images * channels, total_height, total_width };
+    bottom_winograd.create(3, bottom_size, ref_mat.type());
+
+    Dtype* dst_data = bottom_winograd.getMat(ACCESS_WRITE).ptr<Dtype>();
+    const Dtype* src_data = ref_mat.getMat(ACCESS_READ).ptr<Dtype>();
+
+    const int32_t dst_image_offset = total_height * total_width * channels;
+    const int32_t src_image_offset = height * width * channels;
+    for (int i = 0; i < num_images; ++i)
+    {
+        addWinogradPadding(&dst_data[dst_image_offset * i], &src_data[src_image_offset * i],
+            total_width, total_height, channels, pad_w_, pad_h_, pad_right_, pad_bottom_);
+    }
+}
+
+template<typename Dtype>
+void OCL4DNNConvSpatial<Dtype>::addWinogradPadding(Dtype* data, const Dtype* ref_data,
+                                                   int32_t width, int32_t height, int32_t channels,
+                                                   int32_t padding_l, int32_t padding_t, int32_t padding_r, int32_t padding_b)
+{
+    for (int32_t z = 0; z < channels; ++z)
+    {
+        for (int32_t y = 0; y < height; ++y)
+        {
+            for (int32_t x = 0; x < width; ++x)
+            {
+                if (y < padding_t || y >= (height - padding_b) ||
+                    x < padding_l || x >= (width - padding_r))
+                {
+                    *data = (Dtype)0;
+                }
+                else
+                {
+                    *data = (Dtype)(*ref_data);
+                    ++ref_data;
+                }
+                ++data;
+            }
+        }
+    }
+}
+
+template<typename Dtype>
 bool OCL4DNNConvSpatial<Dtype>::swizzleWeight(const UMat &weight,
                                               int32_t swizzled_factor,
                                               bool interleave)
@@ -834,6 +911,64 @@ bool OCL4DNNConvSpatial<float>::createBasicKernel(int32_t blockWidth,
         size_t globalSize[3] = { (size_t)output_w_, (size_t)output_h_, (size_t)M_ };
         kernelQueue.push_back(makePtr<kernelConfig>(kernel_name_, &globalSize[0], (const size_t*)NULL, &workItemOutput[0],
                                                     false, KERNEL_TYPE_BASIC));
+        return true;
+    }
+    else
+        return false;
+}
+
+template<>
+void OCL4DNNConvSpatial<float>::calcWinogradPadding(int32_t blockWidth, int32_t blockHeight)
+{
+    const int32_t totalWidth = 2 * pad_w_ + width_;
+    const int32_t remainW = totalWidth % blockWidth;
+    if (remainW)
+    {
+        pad_right_ = pad_w_ + (blockWidth - remainW);
+    }
+    else
+        pad_right_ = pad_w_;
+
+    const int32_t totalHeight = 2 * pad_h_ + height_;
+    const int32_t remainH = totalHeight % blockHeight;
+    if (remainH)
+    {
+        pad_bottom_ = pad_h_ + (blockHeight - remainH);
+    }
+    else
+        pad_bottom_ = pad_h_;
+}
+
+template<>
+size_t* OCL4DNNConvSpatial<float>::calcWinogradWorksize(size_t* worksize, int32_t blockWidth, int32_t blockHeight) const
+{
+    worksize[0] = (output_w_ % blockWidth) ? (output_w_ / blockWidth) + 1 : output_w_ / blockWidth;
+    worksize[1] = (output_h_ % blockHeight) ? (output_h_ / blockHeight) + 1 : output_h_ / blockHeight;
+    worksize[2] = M_;
+
+    return worksize;
+}
+
+template<>
+bool OCL4DNNConvSpatial<float>::createWinogradKernel(int32_t blockWidth,
+                                                     int32_t blockHeight, int32_t blockDepth)
+{
+    kernelType_ = KERNEL_TYPE_WINOGRAD;
+    blockM_ = blockWidth;
+    blockK_ = blockHeight;
+    blockN_ = blockDepth;
+
+    calcWinogradPadding(blockWidth, blockHeight);
+    setupKernel();
+
+    ocl::Program program = compileKernel();
+    if (program.ptr())
+    {
+
+        int32_t workItemOutput[3] = { 1, 1, 1 };
+        size_t globalSize[3] = { 1 };
+        kernelQueue.push_back(makePtr<kernelConfig>(kernel_name_, calcWinogradWorksize(globalSize, blockWidth, blockHeight), (const size_t*)NULL, &workItemOutput[0],
+            false, KERNEL_TYPE_WINOGRAD));
         return true;
     }
     else
@@ -1127,6 +1262,59 @@ bool OCL4DNNConvSpatial<float>::convolve(const UMat &bottom, UMat &top,
         {
             std::cout << "DWCONV kernel run failed." << std::endl;
             return false;
+        }
+    }
+    else if (config->kernelType == KERNEL_TYPE_WINOGRAD)
+    {
+        prepareWinogradInput(bottom, width_, height_, channels_, numImages);
+
+        const int32_t total_input_width = width_ + pad_w_ + pad_right_;
+        const int32_t total_input_height = height_ + pad_h_ + pad_bottom_;
+        const int32_t input_size = total_input_width * total_input_height;
+        const int32_t kernel_size = kernel_h_ * kernel_w_;
+        const int32_t output_size = output_h_ * output_w_;
+        const int32_t total_bottom_dim = channels_ * input_size;
+
+        for (int32_t n = 0; n < numImages; ++n) {
+            for (int32_t g = 0; g < group_; ++g) {
+                int32_t group_output_offset = M_ * g;
+                int32_t group_channel_offset = (channels_ / group_) * g;
+
+                bias_offset = group_output_offset;
+                int32_t image_offset = n * total_bottom_dim + input_size * group_channel_offset;
+                int32_t output_image_offset = n * top_dim_ + output_size * group_output_offset;
+                int32_t kernel_offset =  kernel_size * group_channel_offset * M_;
+
+                ocl::Kernel kernel(config->kernelName.c_str(), program);
+                if (kernel.empty())
+                    return false;
+
+                cl_uint argIdx = 0;
+                setFusionArg(fused_activ_, fused_eltwise_, kernel, argIdx);
+
+                kernel.set(argIdx++, ocl::KernelArg::PtrReadOnly(bottom_winograd));
+                kernel.set(argIdx++, image_offset);
+                kernel.set(argIdx++, ocl::KernelArg::PtrReadOnly(weight));
+                kernel.set(argIdx++, kernel_offset);
+                if (bias_term_)
+                    kernel.set(argIdx++, ocl::KernelArg::PtrReadOnly(bias));
+                else
+                    kernel.set(argIdx++, (void*)NULL);
+                kernel.set(argIdx++, bias_offset);
+                kernel.set(argIdx++, ocl::KernelArg::PtrWriteOnly(top));
+                kernel.set(argIdx++, (int32_t)(top.offset / element_size));
+                kernel.set(argIdx++, output_image_offset);
+                kernel.set(argIdx++, total_input_width);
+                kernel.set(argIdx++, input_size);
+                kernel.set(argIdx++, output_w_);
+                kernel.set(argIdx++, output_h_);
+
+                if (!kernel.run(3, config->global_work_size, NULL, false))
+                {
+                    std::cout << "WINOGRAD kernel run failed." << std::endl;
+                    return false;
+                }
+            }
         }
     } else {
         for (int32_t n = 0; n < numImages; ++n) {
@@ -1572,6 +1760,8 @@ bool OCL4DNNConvSpatial<float>::createConvolutionKernel(int32_t kernelType,
         return createGEMMLikeConvKernel(blockWidth, blockHeight, blockDepth);
     else if (kernelType == KERNEL_TYPE_DWCONV)
         return createDWConvKernel(blockWidth, blockHeight, blockDepth);
+    else if (kernelType == KERNEL_TYPE_WINOGRAD)
+        return createWinogradKernel(blockWidth, blockHeight, blockDepth);
     else
         CV_Assert(0 && "Internal error");
     return false;
@@ -1664,8 +1854,40 @@ void OCL4DNNConvSpatial<float>::generate_dwconv_tuneritems(std::vector< cv::Ptr<
 }
 
 template<>
+void OCL4DNNConvSpatial<float>::generate_winograd_tuneritems(std::vector< cv::Ptr<tunerParam> >& tunerItems,
+    int outPatchW, int outPatchH, int outChannels)
+{
+    if (stride_w_ != 1 || stride_h_ != 1 || dilation_w_ != 1 || dilation_h_ != 1)
+    {
+        return;
+    }
+    if (kernel_w_ == 3 && kernel_h_ == 3)
+    {
+        // winograd only operates on 2x2 output patches and every work item produces a 2x2 output
+        if (((outPatchW % 2) == 0) && ((outPatchH % 2) == 0))
+        {
+            tunerItems.push_back(makePtr<tunerParam>(KERNEL_TYPE_WINOGRAD, outPatchW, outPatchH, outChannels));
+        }
+    }
+
+}
+
+template<>
+void OCL4DNNConvSpatial<float>::generate_basic_tuneritems(std::vector< cv::Ptr<tunerParam> >& tunerItems,
+    int blockM, int blockK, int blockN)
+{
+    tunerItems.push_back(makePtr<tunerParam>(KERNEL_TYPE_BASIC, blockM, blockK, blockN));
+}
+
+template<>
 void OCL4DNNConvSpatial<float>::generateTunerItems(std::vector< cv::Ptr<tunerParam> > &tunerItems)
 {
+    if (!use_half_)
+    {
+        generate_winograd_tuneritems(tunerItems, 2, 2, 1);
+    }
+    generate_basic_tuneritems(tunerItems, 1, 1, 1);
+
     if (ocl::Device::getDefault().intelSubgroupsSupport())
     {
         // depthwise kernel
@@ -1705,8 +1927,7 @@ void OCL4DNNConvSpatial<float>::useFirstAvailable(const UMat &bottom,
                                                   UMat &verifyTop)
 {
     std::vector< cv::Ptr<tunerParam> > tunerItems;
-    generateTunerItems(tunerItems);
-    tunerItems.push_back(makePtr<tunerParam>(KERNEL_TYPE_BASIC, 1, 1, 1));
+    generateTunerItems(tunerItems);    
 
     for (int i = 0; i < tunerItems.size(); i++)
     {

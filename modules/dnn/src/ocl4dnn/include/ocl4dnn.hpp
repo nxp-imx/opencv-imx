@@ -12,6 +12,7 @@
 //
 // Copyright (C) 2017, Intel Corporation, all rights reserved.
 // Copyright (c) 2016-2017 Fabian David Tschopp, all rights reserved.
+// Copyright 2019 NXP
 // Third party copyrights are property of their respective owners.
 //
 // Redistribution and use in source and binary forms, with or without modification,
@@ -216,6 +217,9 @@ class OCL4DNNConvSpatial
         bool createBasicKernel(int32_t blockWidth,
                                int32_t blockHeight,
                                int32_t blockDepth);
+        bool createWinogradKernel(int32_t blockWidth,
+                                  int32_t blockHeight,
+                                  int32_t blockDepth);
         bool createGEMMLikeConvKernel(int32_t blockWidth,
                                       int32_t blockHeight,
                                       int32_t blockDepth);
@@ -268,8 +272,18 @@ class OCL4DNNConvSpatial
                                           int blockM, int blockK, int blockN);
         void generate_idlf_tuneritems(std::vector< cv::Ptr<tunerParam> > &tunerItems,
                                       int blockM, int blockK, int simd_size);
+        void generate_winograd_tuneritems(std::vector< cv::Ptr<tunerParam> > &tunerItems,
+                                          int outPatchW, int outPatchH, int outChannels);
+        void generate_basic_tuneritems(std::vector< cv::Ptr<tunerParam> >& tunerItems,
+                                       int blockM, int blockK, int blockN);
         void setFusionDefine(ocl4dnnFusedActiv_t fused_activ, bool fused_eltwise);
         void setFusionArg(ocl4dnnFusedActiv_t fused_activ, bool fused_eltwise, ocl::Kernel &kernel, cl_uint &argIdx);
+
+        void prepareWinogradInput(const UMat& ref_mat, int32_t width, int32_t height, int32_t channels, int32_t num_images);
+        void addWinogradPadding(Dtype* data, const Dtype* ref_data, int32_t width, int32_t height, int32_t channels,
+                                int32_t padding_l, int32_t padding_t, int32_t padding_r, int32_t padding_b);
+        void calcWinogradPadding(int32_t blockWidth, int32_t blockHeight);
+        size_t* calcWinogradWorksize(size_t* worksize, int32_t blockWidth, int32_t blockHeight) const;
 
         int32_t group_;
         bool bias_term_;
@@ -277,7 +291,8 @@ class OCL4DNNConvSpatial
         UMat weights_half;
         UMat bias_half;
         UMat bottom_data2_;
-
+        UMat bottom_winograd;
+        
         int32_t bottom_index_;
         int32_t output_h_;
         int32_t output_w_;
