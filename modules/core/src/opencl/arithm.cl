@@ -463,7 +463,7 @@ __kernel void KF(__global const uchar * srcptr1, int srcstep1, int srcoffset1,
         int dst_index  = mad24(y0, dststep, mad24(x, (int)sizeof(dstT_C1) * cn, dstoffset));
         EXTRA_INDEX;
 
-        for (int y = y0, y1 = min(rows, y0 + rowsPerWI); y < y1; ++y, src1_index += srcstep1, dst_index += dststep)
+        for (int i = y0, y1 = min(rows, y0 + rowsPerWI); i < y1; ++i, src1_index += srcstep1, dst_index += dststep)
         {
             PROCESS_ELEM;
 #if !(defined(OP_RECIP_SCALE) || defined(OP_NOT))
