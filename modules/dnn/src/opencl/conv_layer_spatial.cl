@@ -188,7 +188,10 @@ __kernel void ConvolveBasic(
                     }
                     for (int kern = 0; kern < ZPAR; kern++)
                     {
-                        sum[kern] += image_dataPtr[x * DILATION_X] * kernel_dataPtr[kern*KERNEL_HEIGHT*KERNEL_WIDTH*CHANNELS + x];
+                        if (kernelNum + kern < OUTPUT_Z)
+                        {
+                            sum[kern] += image_dataPtr[x * DILATION_X] * kernel_dataPtr[kern*KERNEL_HEIGHT*KERNEL_WIDTH*CHANNELS + x];
+                        }
                     }
                 }
                 image_dataPtr += input_width * DILATION_Y;
