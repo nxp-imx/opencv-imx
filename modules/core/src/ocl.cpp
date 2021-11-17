@@ -5397,7 +5397,9 @@ public:
     {
         const Device& dev = ctx.device(0);
         createFlags = 0;
-        if ((usageFlags & USAGE_ALLOCATE_HOST_MEMORY) != 0)
+        bool allocHostPtr = utils::getConfigurationParameterBool("OPENCV_OPENCL_ALIGNMENT_MEM_ALLOC_HOST_PTR", false);
+
+        if ((usageFlags & USAGE_ALLOCATE_HOST_MEMORY) != 0 || allocHostPtr)
             createFlags |= CL_MEM_ALLOC_HOST_PTR;
 
         if (!isOpenCLCopyingForced() &&
