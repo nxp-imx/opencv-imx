@@ -1,0 +1,9 @@
+Package:                     opencv-imx.git
+Version:                     4.6.0.imx
+Outgoing License:            Apache-2.0 
+License File:                LICENSE
+Type of Content:             source
+Description and comments:    i.MX OpenCV
+Release Location:            https://github.com/nxp-imx/opencv-imx -b lf-6.1.1-1.0.0
+Origin:                      NXP (Apache-2.0)
+                             OpenCV Foundation (Apache-2.0) - https://github.com/opencv/opencv
