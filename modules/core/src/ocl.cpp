@@ -39,6 +39,10 @@
 //
 //M*/
 
+/*
+ * Copyright 2023 NXP
+ */
+
 #include "precomp.hpp"
 
 #ifndef HAVE_OPENCL
